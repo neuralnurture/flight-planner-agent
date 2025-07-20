@@ -4,14 +4,17 @@ import argparse
 from serpapi import GoogleSearch
 from dotenv import load_dotenv
 import pandas as pd
+from datetime import datetime
 
-def fetch_flight_data_raw(from_city: str,
-                          to_city: str,
-                          depart_date: str,
-                          api_key: str,
-                          raw_json_file: str) -> None:
+def fetch_flight_data_raw(
+    from_city: str,
+    to_city: str,
+    depart_date: str,
+    api_key: str,
+    raw_json_file: str
+) -> None:
     """
-    Fetch raw flight data from SerpApi and save to a JSON file.
+    Fetch raw one-way flight data from SerpApi, add a timestamp, and save to JSON.
     """
     params = {
         "engine": "google_flights",
@@ -24,23 +27,28 @@ def fetch_flight_data_raw(from_city: str,
     search = GoogleSearch(params)
     results = search.get_dict()
 
+    # Capture local execution timestamp
+    fetched_at = datetime.now().isoformat()
+    results["_fetched_at"] = fetched_at
+
     with open(raw_json_file, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
 
-    print(f"Saved raw JSON to '{raw_json_file}'")
+    print(f"Saved raw JSON to '{raw_json_file}' (fetched_at={fetched_at})")
 
 
-def process_flight_data(raw_json_file: str,
-                        output_csv: str) -> pd.DataFrame:
+def process_flight_data(
+    raw_json_file: str,
+    output_csv: str
+) -> pd.DataFrame:
     """
-    Load raw JSON flight data, transform into a DataFrame, and save to CSV.
-    Returns the DataFrame.
+    Load raw JSON flight data, transform into a DataFrame with timestamp, and save to CSV.
     """
     with open(raw_json_file, "r", encoding="utf-8") as f:
         data = json.load(f)
 
+    fetched_at = data.get("_fetched_at", "")
     all_flights = data.get("best_flights", []) + data.get("other_flights", [])
-
     rows = []
     for entry in all_flights:
         seg = entry["flights"][0]
@@ -59,6 +67,7 @@ def process_flight_data(raw_json_file: str,
             "duration_min": entry.get("total_duration", seg.get("duration")),
             "price_usd": entry.get("price"),
             "booking_token": entry.get("booking_token"),
+            "fetched_at": fetched_at,
         })
 
     df = pd.DataFrame(rows)
@@ -70,7 +79,7 @@ def process_flight_data(raw_json_file: str,
 def main():
     load_dotenv()
     parser = argparse.ArgumentParser(
-        description="Pipeline to fetch and process flight data via SerpApi."
+        description="Pipeline to fetch and process one-way flight data via SerpApi."
     )
     parser.add_argument("--from_city", required=True,
                         help="IATA code of departure city (e.g., DEL)")
@@ -79,9 +88,9 @@ def main():
     parser.add_argument("--depart_date", required=True,
                         help="Date of departure in YYYY-MM-DD format")
     parser.add_argument("--raw_json", default=None,
-                        help="Filename for saving raw JSON output. Defaults to '{from}_{to}_{date}.json'")
+                        help="Filename for JSON. Defaults to '{from}_{to}_{date}.json'")
     parser.add_argument("--output_csv", default=None,
-                        help="Filename for saving processed CSV data. Defaults to '{from}_{to}_{date}.csv'")
+                        help="Filename for CSV. Defaults to '{from}_{to}_{date}.csv'")
     args = parser.parse_args()
 
     api_key = os.getenv("SERPAPI_API_KEY")
@@ -91,7 +100,6 @@ def main():
     raw_json_file = args.raw_json or f"{args.from_city}_{args.to_city}_{args.depart_date}.json"
     output_csv_file = args.output_csv or f"{args.from_city}_{args.to_city}_{args.depart_date}.csv"
 
-    # Step 1: Fetch raw data
     fetch_flight_data_raw(
         from_city=args.from_city,
         to_city=args.to_city,
@@ -99,8 +107,6 @@ def main():
         api_key=api_key,
         raw_json_file=raw_json_file
     )
-
-    # Step 2: Process and save to CSV
     process_flight_data(
         raw_json_file=raw_json_file,
         output_csv=output_csv_file
