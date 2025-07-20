@@ -4,15 +4,18 @@ import argparse
 from serpapi import GoogleSearch
 from dotenv import load_dotenv
 import pandas as pd
+from datetime import datetime
 
-def fetch_roundtrip_data_raw(from_city: str,
-                             to_city: str,
-                             depart_date: str,
-                             return_date: str,
-                             api_key: str,
-                             raw_json_file: str) -> None:
+def fetch_roundtrip_data_raw(
+    from_city: str,
+    to_city: str,
+    depart_date: str,
+    return_date: str,
+    api_key: str,
+    raw_json_file: str
+) -> None:
     """
-    Fetch raw round-trip flight data from SerpApi and save to a JSON file.
+    Fetch raw round-trip flight data from SerpApi, add a timestamp, and save to JSON.
     """
     params = {
         "engine": "google_flights",
@@ -26,21 +29,27 @@ def fetch_roundtrip_data_raw(from_city: str,
     search = GoogleSearch(params)
     results = search.get_dict()
 
+    # Capture local execution timestamp
+    fetched_at = datetime.now().isoformat()
+    results["_fetched_at"] = fetched_at
+
     with open(raw_json_file, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
 
-    print(f"Saved round-trip JSON to '{raw_json_file}'")
+    print(f"Saved round-trip JSON to '{raw_json_file}' (fetched_at={fetched_at})")
 
 
-def process_roundtrip_data(raw_json_file: str,
-                           output_csv: str) -> pd.DataFrame:
+def process_roundtrip_data(
+    raw_json_file: str,
+    output_csv: str
+) -> pd.DataFrame:
     """
-    Load raw round-trip JSON flight data, transform into a DataFrame, and save to CSV.
-    Returns the DataFrame.
+    Load raw round-trip JSON flight data, transform into a DataFrame with timestamp, and save to CSV.
     """
     with open(raw_json_file, "r", encoding="utf-8") as f:
         data = json.load(f)
 
+    fetched_at = data.get("_fetched_at", "")
     all_flights = data.get("best_flights", []) + data.get("other_flights", [])
     rows = []
     for entry in all_flights:
@@ -61,7 +70,9 @@ def process_roundtrip_data(raw_json_file: str,
             "price_usd": entry.get("price"),
             "trip_type": entry.get("type"),
             "departure_token": entry.get("departure_token"),
+            "fetched_at": fetched_at,
         })
+
     df = pd.DataFrame(rows)
     df.to_csv(output_csv, index=False)
     print(f"Created CSV '{output_csv}' with {len(df)} rows.")
@@ -71,7 +82,7 @@ def process_roundtrip_data(raw_json_file: str,
 def main():
     load_dotenv()
     parser = argparse.ArgumentParser(
-        description="Fetch round-trip flight data and convert to CSV."
+        description="Pipeline to fetch and process round-trip flight data via SerpApi."
     )
     parser.add_argument("--from_city", required=True,
                         help="IATA code of departure city (e.g., DEL)")
@@ -82,9 +93,9 @@ def main():
     parser.add_argument("--return_date", required=True,
                         help="Return date in YYYY-MM-DD format")
     parser.add_argument("--raw_json", default=None,
-                        help="Raw JSON filename. Defaults to '{from}_{to}_{depart}_{return}.json'")
+                        help="Filename for JSON. Defaults to '{from}_{to}_{depart}_{return}.json'")
     parser.add_argument("--output_csv", default=None,
-                        help="Output CSV filename. Defaults to '{from}_{to}_{depart}_{return}.csv'")
+                        help="Filename for CSV. Defaults to '{from}_{to}_{depart}_{return}.csv'")
     args = parser.parse_args()
 
     api_key = os.getenv("SERPAPI_API_KEY")
@@ -94,7 +105,6 @@ def main():
     raw_json_file = args.raw_json or f"{args.from_city}_{args.to_city}_{args.depart_date}_{args.return_date}.json"
     output_csv_file = args.output_csv or f"{args.from_city}_{args.to_city}_{args.depart_date}_{args.return_date}.csv"
 
-    # Fetch JSON
     fetch_roundtrip_data_raw(
         from_city=args.from_city,
         to_city=args.to_city,
@@ -103,12 +113,11 @@ def main():
         api_key=api_key,
         raw_json_file=raw_json_file
     )
-
-    # Process JSON to CSV
     process_roundtrip_data(
         raw_json_file=raw_json_file,
         output_csv=output_csv_file
     )
+
 
 if __name__ == "__main__":
     main()
